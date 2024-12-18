@@ -1,0 +1,948 @@
+---
+title: "DS2020 Final Project"
+author: "Adam Grimm"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Importing The Data**
+
+```{R}
+library(tidyverse)
+data_frame <- readr::read_csv("C:\\Users\\grimm\\OneDrive\\Desktop\\Iowa State Fall 2024\\DS2020\\Final Project\\DS2020 Final Project\\PLACES__Local_Data_for_Better_Health__Census_Tract_Data_2024_release_20241214.csv")
+
+
+head(data_frame)
+
+```
+
+**Step: Survey** - Have a look at data types, data frame dimensions, and
+values
+
+```{R}
+str(data_frame)
+dim(data_frame)
+summary(data_frame)
+sapply(data_frame, class)
+colnames(data_frame)
+```
+
+Note 1: Data frame measurement 3,183,048 rows, 24 columns
+
+Note 2: Numeric, Character, Logical values present
+
+```{R}
+
+length(unique(data_frame$Year))
+unique(data_frame$Year)
+
+length(unique(data_frame$StateAbbr))
+unique(data_frame$StateAbbr)
+
+length(unique(data_frame$Category))
+unique(data_frame$Category)
+
+length(unique(data_frame$Measure))
+unique(data_frame$Measure)
+
+length(unique(data_frame$Data_Value_Unit))
+unique(data_frame$Data_Value_Unit)
+
+length(unique(data_frame$Data_Value_Type))
+unique(data_frame$Data_Value_Type)
+
+
+```
+
+Note 1: Data is only for 2020,2021, I thought it would be more.
+
+Note 2: The Data is for all 51 states, but no territories.
+
+Note 3: There are six values for the "Category" column, Disability,
+Health Outcomes, Prevention, Health Risk Behaviors, Health Status,
+Health-Related Social Needs
+
+Note 4: There are 40 values for the "Measures" column. There are likely
+multiple for each category, but I'm not going to check that here.
+
+Note 5: There is only 1 value for Data_Value_Unit %. This percentile all
+units for for percentile
+
+# Cleaning
+
+**Step : Cleaning** - Looking for Null Values
+
+```{R}
+
+#Count the number of null and non null for each column
+null_counts <- sapply(data_frame, function(x) sum(is.na(x)))
+non_null_counts <- sapply(data_frame, function(x) sum(!is.na(x)))
+
+#Create small table to see the number of null non-null for each column
+null_summary <- data.frame(
+  Column = names(data_frame),
+  Null_Count = null_counts,
+  Non_Null_Count = non_null_counts
+)
+#display table
+null_summary
+
+```
+
+Note 1: Data_Value_Footnote_Symbol and Data_Value_Footnote both have
+3,183,048 null counts which is the same as the number of rows. Both of
+these rows can be eliminated
+
+**Step: Cleaning -** Remove Unneeded columns Data_Value_Footnote_Symbol
+and Data_Value_Footnote
+
+```{R}
+
+data_frame <- data_frame[, !(colnames(data_frame) %in% c("Data_Value_Footnote", "Data_Value_Footnote_Symbol"))]
+
+colnames(data_frame)
+head(data_frame)
+
+```
+
+Note 1: Dataframe is now 3183048 by 22 now
+
+# Data Manipulation/Organization
+
+**Step: Data Manipulation** -Find National, State, County Average,Median
+and Mode for each Measure So I can compare each state and county against
+the National Average.
+
+```{R}
+library(dplyr)
+
+get_mode <- function(x) {
+  uniq_x <- unique(na.omit(x))    
+  uniq_x[which.max(tabulate(match(x, uniq_x)))]
+}
+
+
+national_stats <- data_frame %>%
+  group_by(Year, Measure) %>%
+  summarise(
+    National_Average = mean(Data_Value, na.rm = TRUE),
+    National_Median = median(Data_Value, na.rm = TRUE),
+    National_Mode = get_mode(Data_Value)
+  )
+state_stats <- data_frame %>%
+  group_by(Year, StateAbbr, Measure) %>%
+  summarise(
+    State_Average = mean(Data_Value, na.rm = TRUE),
+    State_Median = median(Data_Value, na.rm = TRUE),
+    State_Mode = get_mode(Data_Value)
+  )
+county_stats <- data_frame %>%
+  group_by(Year, StateAbbr, CountyName, Measure) %>%
+  summarise(
+    County_Average = mean(Data_Value, na.rm = TRUE),
+    County_Median = median(Data_Value, na.rm = TRUE),
+    County_Mode = get_mode(Data_Value)
+  )
+
+data_frame <- left_join(data_frame, national_stats, by = c("Year", "Measure"))
+
+# Join State stats
+data_frame <- left_join(data_frame, state_stats, by = c("Year", "StateAbbr", "Measure"))
+
+# Join County stats
+data_frame <- left_join(data_frame, county_stats, by = c("Year", "StateAbbr", "CountyName", "Measure"))
+
+# View the updated data frame
+print(head(data_frame))
+
+```
+
+**Step: Data Manipulation** - Comparing national averages to state and
+county and creating new columns
+
+```{R}
+data_frame <- data_frame %>%
+  mutate(
+    # Differences between State and National statistics
+    State_National_Avg_Diff = State_Average - National_Average,
+    State_National_Med_Diff = State_Median - National_Median,
+    State_National_Mode_Diff = State_Mode - National_Mode,
+
+    # Differences between County and National statistics
+    County_National_Avg_Diff = County_Average - National_Average,
+    County_National_Med_Diff = County_Median - National_Median,
+    County_National_Mode_Diff = County_Mode - National_Mode,
+
+    # Differences between County and State statistics
+    County_State_Avg_Diff = County_Average - State_Average,
+    County_State_Med_Diff = County_Median - State_Median,
+    County_State_Mode_Diff = County_Mode - State_Mode
+  )
+
+# View updated data frame
+print(head(data_frame))
+```
+
+**Step: Data Manipulation** - Distinguish "Measures" with positive vs
+negative outcomes.
+
+```{R}
+# Create list of positive and negative measures
+positive_measures <- c(
+  "Cholesterol screening among adults",
+  "Visited dentist or dental clinic in the past year among adults",
+  "Visits to doctor for routine checkup within the past year among adults",
+  "Colorectal cancer screening among adults aged 45–75 years",
+  "Mammography use among women aged 50-74 years"
+)
+
+# Add Category_Type column 
+data_frame <- data_frame %>%
+  mutate(
+    Category_Type = ifelse(Measure %in% positive_measures, "Positive", "Negative")
+  )
+
+# Check the updated data
+head(data_frame)
+```
+
+# **Data Exploration**
+
+**Step: Data Exploration** - Reverse rank count for positive measures
+
+```{R}
+data_frame <- data_frame %>%
+  group_by(Year, Measure) %>%
+  mutate(
+    # Adjust State Rank: Reverse for positive measures
+    State_Rank = ifelse(Category_Type == "Positive", 
+                        dense_rank(desc(State_National_Avg_Diff)),  # Reverse rank for Positive
+                        dense_rank(State_National_Avg_Diff))        # Normal rank for Negative
+  ) %>%
+  group_by(Year, StateAbbr, Measure) %>%
+  mutate(
+    # Adjust County Rank: Reverse for positive measures
+    County_Rank = ifelse(Category_Type == "Positive",
+                         dense_rank(desc(County_State_Avg_Diff)),   # Reverse rank for Positive
+                         dense_rank(County_State_Avg_Diff))         # Normal rank for Negative
+  ) %>%
+  ungroup() # Remove grouping to avoid conflicts later
+
+# View the updated data frame
+print(head(data_frame))
+```
+
+**Step: Data Exploration** - Ranking each state based on how it compares
+to national average for each "Measure", and averaging all of each
+state's "Measures" together and applying overall rank. For instances of
+"Ties that occur in the Average_State_Rank the state with a higher
+percentage of counties above the national average wins the tie.
+
+```{R}
+
+
+county_percentage <- data_frame %>%
+  group_by(Year, StateAbbr) %>%
+  summarise(
+    Total_Counties = n(),
+    Counties_Above_National = sum(County_National_Avg_Diff > 0, na.rm = TRUE),
+    Percentage_Above_National = (Counties_Above_National / Total_Counties) * 100
+  )
+
+
+state_yearly_ranks <- data_frame %>%
+  group_by(Year, StateAbbr) %>%
+  summarise(
+    Average_State_Rank = mean(State_Rank, na.rm = TRUE) # Average rank per state and year
+  ) %>%
+  left_join(county_percentage, by = c("Year", "StateAbbr")) %>% # Join with percentages
+  group_by(Year) %>%
+  arrange(Year, Average_State_Rank, desc(Percentage_Above_National)) %>% # Sort by rank and tie-breaker
+  mutate(
+    Overall_Rank = row_number() # Assign unique ranks based on sorted order
+  ) %>%
+  ungroup()
+
+
+print(state_yearly_ranks)
+```
+
+**Step: Data Exploration -** Separated original graph into increasing
+rank, decreasing rank, and no movement
+
+```{R}
+library(ggplot2)
+library(dplyr)
+
+
+rank_movement <- state_yearly_ranks %>%
+  filter(Year %in% c(2021, 2022)) %>% # Focus only on 2021 and 2022
+  select(StateAbbr, Year, Overall_Rank) %>%
+  pivot_wider(names_from = Year, values_from = Overall_Rank, names_prefix = "Rank_") %>%
+  mutate(
+    Rank_Change = Rank_2021 - Rank_2022, # Positive = moved up, Negative = moved down
+    Movement_Category = case_when(
+      Rank_Change > 0 ~ "Up",       # Improved in rank
+      Rank_Change < 0 ~ "Down",     # Worsened in rank
+      Rank_Change == 0 ~ "Same"     # Stayed the same
+    )
+  )
+
+
+state_yearly_ranks_with_movement <- state_yearly_ranks %>%
+  left_join(rank_movement %>% select(StateAbbr, Movement_Category), by = "StateAbbr")
+
+up_states <- state_yearly_ranks_with_movement %>%
+  filter(Movement_Category == "Up")
+
+
+ggplot(up_states, aes(x = Year, y = Overall_Rank, group = StateAbbr, color = StateAbbr)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = c(2021, 2022), labels = c("2021", "2022")) +
+  scale_y_reverse() + # Reverse y-axis so rank 1 is at the top
+  labs(
+    title = "States that Improved in Rank (2021-2022)",
+    x = "Year",
+    y = "Overall Rank",
+    color = "State"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 10),
+    legend.position = "right"
+  )
+                
+```
+
+Notes: For states that moving up in rank, it seems like there is about
+and equal amount of state jumping several spots and others gradually
+increasing.
+
+```{R}
+# Filter for "Down" states
+down_states <- state_yearly_ranks_with_movement %>%
+  filter(Movement_Category == "Down")
+
+# Plot for States that Worsened in Rank
+ggplot(down_states, aes(x = Year, y = Overall_Rank, group = StateAbbr, color = StateAbbr)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = c(2021, 2022), labels = c("2021", "2022")) +
+  scale_y_reverse() +
+  labs(
+    title = "States that Worsened in Rank (2021-2022)",
+    x = "Year",
+    y = "Overall Rank",
+    color = "State"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 10),
+    legend.position = "right"
+  )
+```
+
+Notes: It seems like about ten states had significant health rank
+changes from 2021 to 2022
+
+```{R}
+same_states <- state_yearly_ranks_with_movement %>%
+  filter(Movement_Category == "Same")
+
+# Plot for States that Stayed the Same
+ggplot(same_states, aes(x = Year, y = Overall_Rank, group = StateAbbr, color = StateAbbr)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = c(2021, 2022), labels = c("2021", "2022")) +
+  scale_y_reverse() +
+  labs(
+    title = "States that Stayed the Same in Rank (2021-2022)",
+    x = "Year",
+    y = "Overall Rank",
+    color = "State"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 10),
+    legend.position = "right"
+  )
+```
+
+Note: Only WV maintained its position.
+
+```{R}
+library(ggplot2)
+library(dplyr)
+
+filtered_state_ranks <- state_yearly_ranks %>%
+  filter(!is.na(StateAbbr) & StateAbbr != "FL")
+
+# Step 1: Reorder StateAbbr based on 2021 ranks
+state_order <- state_yearly_ranks %>%
+  filter(Year == 2021) %>%
+  arrange(Overall_Rank) %>% # Arrange by rank so top-ranked states are first
+  pull(StateAbbr)           # Extract the ordered list of states
+
+# Step 2: Update StateAbbr as a factor with the desired order
+state_yearly_ranks <- state_yearly_ranks %>%
+  mutate(StateAbbr = factor(StateAbbr, levels = state_order))
+
+ggplot(filtered_state_ranks, aes(x = Year, y = StateAbbr, fill = Overall_Rank)) +
+  geom_tile() +
+  scale_x_continuous(breaks = c(2021, 2022), labels = c("2021", "2022")) + # Only display 2021 and 2022
+  scale_fill_gradient(low = "darkgreen", high = "red") + # Dark green = good rank, Red = poor rank
+  labs(
+    title = "State Rankings Heatmap by Year",
+    x = "Year",
+    y = "State (Ordered by 2021 Rank)",
+    fill = "Rank"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 8)
+  )
+```
+
+Note: Data from Florida (appearing as NA) 2021 is missing this will
+slightly skew the rankings, but hopefully not as much as as they were
+previously. Most it seems like states that were higher ranked stated
+higher ranked, mid rank seems like it moved both directions equally, and
+the bottom ranking stayed at the bottom for the most but some moved up
+significantly.
+
+Note: I removed florida from charts
+
+```{R}
+library(ggplot2)
+library(dplyr)
+
+ggplot(filtered_state_ranks, aes(x = reorder(StateAbbr, -Average_State_Rank), y = Average_State_Rank)) +
+  geom_bar(stat = "identity", aes(fill = as.factor(Year)), show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~ Year) + # Separate panels for 2021 and 2022
+  labs(
+    title = "Average State Rankings by Year (Excluding Florida)",
+    x = "State",
+    y = "Average Rank"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(size = 10)
+  )
+```
+
+```{R}
+# Filter for Top 5 and Bottom 5 states
+top_bottom_states <- state_yearly_ranks %>%
+  group_by(StateAbbr) %>%
+  summarise(Avg_Rank = mean(Overall_Rank)) %>%
+  arrange(Avg_Rank) %>%
+  filter(row_number() <= 5 | row_number() > (n() - 5))
+
+# Join back to state_yearly_ranks
+filtered_ranks <- state_yearly_ranks %>%
+  filter(StateAbbr %in% top_bottom_states$StateAbbr)
+
+# Plot
+ggplot(filtered_ranks, aes(x = Year, y = Overall_Rank, group = StateAbbr, color = StateAbbr)) +
+  geom_line(size = 1) +
+  geom_point() +
+  scale_x_continuous(breaks = c(2021, 2022), labels = c("2021", "2022")) + # Only show 2021 and 2022
+  scale_y_reverse() + # Reverse y-axis so rank 1 is at the top
+  facet_wrap(~ StateAbbr, scales = "free_y") +
+  labs(
+    title = "Top and Bottom 5 States' Rankings Over Time",
+    x = "Year",
+    y = "Overall Rank",
+    color = "State"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 10) # Adjust x-axis text size
+  )
+```
+
+Note: Of the top and bottom states they seem to be consistent with the
+number of states that increase vs decrease. I am starting to notice that
+MS, AL, WV and KY are consistently in the bottom of health outcomes.
+
+```{R}
+library(ggplot2)
+library(dplyr)
+library(maps)
+
+# Get map data for US states
+us_states <- map_data("state") # Fetches state boundary data
+us_states$region <- tolower(us_states$region)
+
+# Prepare the filtered state ranks data
+filtered_state_ranks_clean <- filtered_state_ranks %>%
+  filter(!is.na(Year)) %>%  # Remove rows where Year is NA
+  mutate(region = tolower(state.name[match(StateAbbr, state.abb)])) %>%
+  filter(!is.na(region))  # Remove rows where region is NA
+
+# Merge filtered state ranks with map data
+map_data_ranks <- us_states %>%
+  left_join(filtered_state_ranks_clean, by = "region")
+
+# Plot the U.S. map with state rankings
+ggplot(map_data_ranks, aes(x = long, y = lat, group = group, fill = Overall_Rank)) +
+  geom_polygon(color = "white", size = 0.4) + # Adds borders around states
+  scale_fill_gradient(low = "blue", high = "red", na.value = "grey80") + # Color scale
+  coord_fixed(1.3) + # Ensures aspect ratio of the map
+  facet_wrap(~ Year) + # Creates separate maps for each year
+  labs(
+    title = "State Rankings by Year",
+    fill = "Rank"
+  ) +
+  theme_minimal()
+```
+
+Note: Florida excluded from dataset appears in NA. I'm also realizing
+that Hawaii and Alaska are not on the map. A negative health trend in
+the midwest to south seems to be appearing, with better health on the
+coasts and north.
+
+**Data Manipulation**
+
+```{R}
+# Summarize State_Rank for each Year, StateAbbr, and Measure
+state_ranks_by_measure <- data_frame %>%
+  group_by(Year, StateAbbr, MeasureId) %>%
+  summarise(
+    State_Rank = mean(State_Rank, na.rm = TRUE) # Take average rank in case of duplicates
+  ) %>%
+  ungroup()
+
+# View the new data frame
+head(state_ranks_by_measure)
+
+
+
+```
+
+**Data Manipulation - Making sure state abbreviation shows up next to
+result**
+
+```{R}
+# Add lowercase state names for merging
+state_ranks_by_measure$region <- tolower(state.name[match(state_ranks_by_measure$StateAbbr, state.abb)])
+```
+
+**Data Manipulation - Matching map data with ranks from my dataset**
+
+```{R}
+# Get US states map data
+us_states <- map_data("state")
+
+# Merge map data with rankings
+map_data_ranks <- us_states %>%
+  left_join(state_ranks_by_measure, by = "region")
+
+# Confirm that all required columns exist
+head(map_data_ranks)
+```
+
+```{R}
+# Filter data for 2021
+map_data_ranks_2021 <- map_data_ranks %>%
+  filter(Year == 2021)
+
+# Plot grid of U.S. maps for 2021
+ggplot(map_data_ranks_2021, aes(x = long, y = lat, group = group, fill = State_Rank)) +
+  geom_polygon(color = "white", size = 0.2) + # State borders
+  scale_fill_gradient(low = "blue", high = "red", na.value = "grey80") + # Blue = better, red = worse
+  coord_fixed(1.3) + # Fix aspect ratio
+  facet_wrap(~ MeasureId, ncol = 4) + # Arrange maps in a grid with 4 columns
+  labs(
+    title = "State Rankings by Measure - 2021",
+    fill = "State Rank"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(size = 8), # Adjust facet label size for readability
+    plot.title = element_text(size = 14, hjust = 0.5) # Center and enlarge the title
+  )
+
+```
+Note: I think I broke this map when trying to separate the year 2021 and 2022
+
+```{R}
+# Filter data for 2022
+map_data_ranks_2022 <- map_data_ranks %>%
+  filter(Year == 2022)
+
+# Plot grid of U.S. maps for 2022
+ggplot(map_data_ranks_2022, aes(x = long, y = lat, group = group, fill = State_Rank)) +
+  geom_polygon(color = "white", size = 0.2) + # State borders
+  scale_fill_gradient(low = "blue", high = "red", na.value = "grey80") + # Blue = better, red = worse
+  coord_fixed(1.3) + # Fix aspect ratio
+  facet_wrap(~ MeasureId, ncol = 4) + # Arrange maps in a grid with 4 columns
+  labs(
+    title = "State Rankings by Measure - 2022",
+    fill = "State Rank"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(size = 8), # Adjust facet label size for readability
+    plot.title = element_text(size = 14, hjust = 0.5) # Center and enlarge the title
+  )
+```
+
+```{R}
+
+state_measure_diff <- data_frame %>%
+  select(Year, StateAbbr, MeasureId, State_National_Avg_Diff, Category_Type) %>%
+  distinct() # Remove duplicates, if any
+
+
+print(head(state_measure_diff))
+
+
+
+```
+
+```{R}
+us_states <- map_data("state")
+
+# Add 'region' column for merging
+state_measure_diff$region <- tolower(state.name[match(state_measure_diff$StateAbbr, state.abb)])
+
+# Merge map data with state-level differences
+map_data_states <- us_states %>%
+  left_join(state_measure_diff, by = "region")
+
+# Split data for positive and negative Category_Type
+positive_data <- map_data_states %>% filter(Category_Type == "Positive")
+negative_data <- map_data_states %>% filter(Category_Type == "Negative")
+```
+
+```{R}
+ggplot(positive_data, aes(x = long, y = lat, group = group, fill = State_National_Avg_Diff)) +
+  geom_polygon(color = "white", size = 0.2) +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "blue", midpoint = 0, 
+    limits = c(-15, 15), oob = scales::squish
+  ) +
+  coord_fixed(1.3) +
+  facet_wrap(~ MeasureId, ncol = 3) +
+  labs(
+    title = "Positive Category Measures: State National Average Difference",
+    fill = "Avg Diff"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+```
+Note: It seems like checkups might only need to occur when cronic conditions are present indicating worse health conditions, 
+
+This interactive graph is meant to show how states compare on different "Measures" because my previous graphs did a bad job. 
+```{}
+install.packages("shiny")
+library(shiny)
+library(ggplot2)
+library(dplyr)
+
+# UI
+ui <- fluidPage(
+  titlePanel("Interactive State Ranking Map"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("measure_id", "Select Measure ID:", 
+                  choices = unique(map_data_states$MeasureId))
+    ),
+    mainPanel(
+      plotOutput("state_map")
+    )
+  )
+)
+
+# Server
+server <- function(input, output) {
+  
+  output$state_map <- renderPlot({
+    # Filter data based on selected MeasureId
+    filtered_data <- map_data_states %>% filter(MeasureId == input$measure_id)
+    
+    # Generate the map
+    ggplot(filtered_data, aes(x = long, y = lat, group = group, fill = State_National_Avg_Diff)) +
+      geom_polygon(color = "white", size = 0.2) +
+      scale_fill_gradient2(
+        low = "blue", mid = "white", high = "red", midpoint = 0,
+        limits = c(-15, 15), oob = scales::squish
+      ) +
+      coord_fixed(1.3) +
+      labs(
+        title = paste("State National Average Difference for", input$measure_id),
+        fill = "Avg Diff"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank()
+      )
+  })
+}
+
+# Run the Shiny App
+shinyApp(ui = ui, server = server)
+```
+Couldn't get the Shiny app to link here well. 
+
+
+
+Data Exploration: Finding the best and worst counties compared to national average
+```{R}
+library(dplyr)
+
+# Summarize average county rank for all measures
+county_health_ranks <- data_frame %>%
+  group_by(StateAbbr, CountyName) %>%
+  summarise(
+    Avg_County_Health = mean(County_National_Avg_Diff, na.rm = TRUE) # Average difference
+  ) %>%
+  ungroup() %>%
+  arrange(Avg_County_Health) # Sort counties for ranking
+
+# Identify the top 10 and bottom 10 counties
+top_10_counties <- county_health_ranks %>% top_n(-10, Avg_County_Health)  # Best counties
+bottom_10_counties <- county_health_ranks %>% top_n(10, Avg_County_Health) # Worst counties
+
+# Combine the two groups for visualization
+top_bottom_counties <- bind_rows(
+  top_10_counties %>% mutate(Category = "Best Counties"),
+  bottom_10_counties %>% mutate(Category = "Worst Counties")
+)
+
+# View the results
+print(top_bottom_counties)
+```
+
+```{R}
+# Add a new column combining CountyName and StateAbbr
+top_bottom_counties <- top_bottom_counties %>%
+  mutate(County_State = paste0(CountyName, " (", StateAbbr, ")")) # Format: "County (State)"
+
+# Plot the bar chart with the updated y-axis
+ggplot(top_bottom_counties, aes(x = reorder(County_State, Avg_County_Health), y = Avg_County_Health, fill = Category)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 10 Best and Worst Counties for Health",
+    x = "County (State)",
+    y = "Poor outcome Health Score (County_State_Avg_Diff)",
+    fill = "Category"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    legend.position = "top"  # Optional: Move legend to the top for better layout
+  )
+```
+NOte: Changed X axis title to be less confusing, from "Health score" to "Poor outcome health score" These states appear inline with the states that have negative trends in previous graphs. 
+
+This graph is to show counties on a state level and how they compare to other counties within a state. 
+```{}
+install.packages(c("shiny", "ggplot2", "dplyr", "sf", "tigris", "leaflet"))
+
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(leaflet)
+library(sf)
+library(tigris)
+
+# Load or simulate your dataset
+# Assume data_frame includes columns: Year, StateAbbr, CountyName, Measure, County_State_Avg_Diff, County_National_Avg_Diff
+State_County_Map <- data_frame %>%
+  select(Year, StateAbbr, CountyName, Measure, County_State_Avg_Diff, County_National_Avg_Diff) %>%
+  filter(!is.na(CountyName))
+
+# Load U.S. county shapefile data
+options(tigris_use_cache = TRUE)
+us_counties <- tigris::counties(cb = TRUE, resolution = "20m", year = 2020)
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Interactive County-Level Health Map"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("state", "Select State:", choices = unique(State_County_Map$StateAbbr)),
+      selectInput("measure", "Select Measure:", choices = unique(State_County_Map$Measure)),
+      radioButtons("comparison", "Compare Against:",
+                   choices = c("National Average" = "County_National_Avg_Diff",
+                               "State Average" = "County_State_Avg_Diff"),
+                   selected = "County_State_Avg_Diff")
+    ),
+    mainPanel(
+      leafletOutput("countyMap")
+    )
+  )
+)
+
+# Define Server
+server <- function(input, output) {
+  
+  # Filter data based on user input
+  filtered_data <- reactive({
+    State_County_Map %>%
+      filter(StateAbbr == input$state, Measure == input$measure)
+  })
+  
+  # Merge with shapefile
+  county_map_data <- reactive({
+    state_counties <- us_counties %>%
+      filter(STUSPS == input$state) # Filter counties for selected state
+    
+    # Merge geographic data with filtered data
+    state_counties <- state_counties %>%
+      left_join(filtered_data(), by = c("NAME" = "CountyName"))
+    
+    state_counties
+  })
+  
+  # Render Leaflet Map
+  output$countyMap <- renderLeaflet({
+    map_data <- county_map_data()
+    
+    # Create color palette
+    pal <- colorNumeric(palette = "RdBu", domain = map_data[[input$comparison]], na.color = "gray80")
+    
+    # Generate Leaflet map
+    leaflet(map_data) %>%
+      addTiles() %>%
+      addPolygons(
+        fillColor = ~pal(get(input$comparison)),
+        weight = 1,
+        color = "white",
+        fillOpacity = 0.7,
+        smoothFactor = 0.5,
+        highlightOptions = highlightOptions(weight = 2, color = "black", bringToFront = TRUE),
+        label = ~paste0(NAME, ": ", round(get(input$comparison), 2))
+      ) %>%
+      addLegend(
+        "bottomright",
+        pal = pal,
+        values = map_data[[input$comparison]],
+        title = paste("Comparison:", ifelse(input$comparison == "County_State_Avg_Diff", "State Average", "National Average")),
+        opacity = 1
+      )
+  })
+}
+
+# Run the App
+shinyApp(ui = ui, server = server)
+
+data_frame
+State_County_Map
+
+```
+
+This Matrix is meant to find if there is a relationship between social needs, preventitive care measure, risky health behaviors and the actual health outcomes. 
+```{R}
+library(dplyr)
+library(tidyr)
+
+# Define the selected measures
+selected_measures <- c(
+  "No leisure-time physical activity among adults",
+  "Short sleep duration among adults",
+  "Current cigarette smoking among adults",
+  "Binge drinking among adults",
+  "Obesity among adults",
+  "High blood pressure among adults",
+  "Frequent mental distress among adults",
+  "Frequent physical distress among adults",
+  "Chronic obstructive pulmonary disease among adults",
+  "Diagnosed diabetes among adults"
+)
+
+# Filter, clean, and reshape the data
+cor_data <- data_frame %>%
+  filter(Measure %in% selected_measures) %>%
+  select(StateAbbr, CountyName, Measure, Data_Value) %>%
+  mutate(Data_Value = as.numeric(Data_Value)) %>%  # Ensure Data_Value is numeric
+  pivot_wider(names_from = Measure, values_from = Data_Value) %>%
+  na.omit()  # Remove rows with missing values
+
+# Verify that all selected columns are numeric
+cor_data
+```
+
+```{R}
+library(dplyr)
+library(tidyr)
+
+# Fix list-columns by extracting the mean value and converting to numeric
+cor_data <- cor_data %>%
+  mutate(across(where(is.list), ~ sapply(., function(x) mean(as.numeric(unlist(x)), na.rm = TRUE))))
+```
+
+Making sure my data is numeric and not lists
+```{R}
+sapply(cor_data, class)
+```
+
+```{R}
+cor_numeric <- cor_data %>%
+  select(-StateAbbr, -CountyName)
+
+# Calculate correlation matrix
+cor_matrix <- cor(cor_numeric, use = "pairwise.complete.obs")
+
+# Print the correlation matrix
+print(cor_matrix)
+```
+Note: There are actually some very interesting results here, most of which are understandable. Obesity among adults is very related to diebetes and not having leisure time, and smoking. COPD is highly related to frequent pain distress in adults and High blood pressure. Some of the most interesting is the binge drinking have a negative correlation with almost all of the negative health outcomes. I was supprised there was a negative correlation between binge drinking and smoking. 
+
+
+Visuilzation of Matrix. 
+```{R}
+library(ggplot2)
+library(tidyr) # For pivot_longer()
+
+# Ensure the correlation matrix contains only numeric values
+cor_matrix <- as.data.frame(cor_matrix) # Convert matrix to data frame for tidyr
+cor_matrix$Var1 <- rownames(cor_matrix) # Preserve row names for x-axis
+
+# Reshape the correlation matrix into long format
+cor_long <- pivot_longer(cor_matrix, 
+                         cols = -Var1,  # All columns except Var1
+                         names_to = "Var2", 
+                         values_to = "value")
+
+# Plot the heatmap
+ggplot(cor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "red", high = "blue", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), space = "Lab",
+                       name = "Correlation") +
+  labs(
+    title = "Correlation Between Health Behaviors and Outcomes",
+    x = "", y = ""
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Conclusion: Health trends almost seem to be regional in the United states. The south was fairing worse in 2021 and 2022, but new england, the west coast and the upper midwest seem to be healthier areas to be. This also might be related to having better access to health insurance. 

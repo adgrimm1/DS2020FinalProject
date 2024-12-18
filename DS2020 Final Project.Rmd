@@ -2,10 +2,8 @@
 title: "DS2020 Final Project"
 author: "Adam Grimm"
 date: "`r Sys.Date()`"
-output: html_document
-editor_options: 
-  markdown: 
-    wrap: 72
+output: rmarkdown::github_document
+
 ---
 
 ```{r setup, include=FALSE}
